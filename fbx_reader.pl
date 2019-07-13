@@ -27,6 +27,26 @@ sub p_pos {
     sprintf("%d(0x%X)", $pos, $pos);
 }
 
+sub is_end {
+    my $pos = shift || 0;
+
+    # 固定长度偏移
+    $pos += 24;
+
+    # 16字节对齐
+    my $align = $pos % 16;
+    if ($align) {
+        $pos += 16 - $align;
+    }
+
+    # 固定长度偏移
+    $pos += 9 * 16;
+
+    # print p_pos($pos) ." <=> ". p_pos($file_size), "\n";
+
+    return $pos >= $file_size;
+}
+
 sub read_unpack {
     my $template = shift || "";
     my $size = shift || 0;
@@ -82,26 +102,6 @@ sub read_node {
     }
 
     print "${indent}< $node_name, ".p_pos(tell $fh)."\n";
-}
-
-sub is_end {
-    my $pos = shift || 0;
-
-    # 固定长度偏移
-    $pos += 24;
-
-    # 16字节对齐
-    my $align = $pos % 16;
-    if ($align) {
-        $pos += 16 - $align;
-    }
-
-    # 固定长度偏移
-    $pos += 9 * 16;
-
-    # print p_pos($pos) ." <=> ". p_pos($file_size), "\n";
-
-    return $pos >= $file_size;
 }
 
 my $pos = tell $fh;
