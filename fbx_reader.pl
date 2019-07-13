@@ -22,17 +22,16 @@ unless ($mark eq 'Kaydara FBX Binary') {
 
 print "FBX version: $version, size: $file_size\n";
 
-sub fh_pos {
+sub p_pos {
     my $pos = shift || 0;
     sprintf("%d(0x%X)", $pos, $pos);
 }
 
 sub read_unpack {
-    my $fh = shift;
     my $template = shift || "";
     my $size = shift || 0;
 
-    return () unless $fh and $template ne "" and $size > 0;
+    return () unless $template ne "" and $size > 0;
     return () unless tell($fh) + $size <= $file_size;
 
     read $fh, my ($buffer), $size;
@@ -55,8 +54,8 @@ sub read_node {
 
     return unless $fh;
 
-    my ($end, $num_props, $len_props, $len_name) = read_unpack $fh, "L L L C", 13;
-    my $name = read_unpack($fh, "A".$len_name, $len_name) || "";
+    my ($end, $num_props, $len_props, $len_name) = read_unpack("L L L C", 13);
+    my $name = read_unpack("A".$len_name, $len_name) || "";
 
     my $node_name = $parent ? "$parent.$name" : $name;
 
@@ -69,7 +68,7 @@ sub read_node {
     my $indent = "  " x $lv;
 
     print "${indent}> $node_name($len_name)\n";
-    print "${indent}  end: $end, num props: $num_props, len props: $len_props, pos: ".fh_pos($pos)."\n";
+    print "${indent}  end: $end, num props: $num_props, len props: $len_props, pos: ".p_pos($pos)."\n";
 
     if ($pos + 13 < $end) {
         # is end of node
@@ -82,7 +81,7 @@ sub read_node {
         seek $fh, 13, 1;
     }
 
-    print "${indent}< $node_name, ".fh_pos(tell $fh)."\n";
+    print "${indent}< $node_name, ".p_pos(tell $fh)."\n";
 }
 
 sub is_end {
@@ -100,7 +99,7 @@ sub is_end {
     # 固定长度偏移
     $pos += 9 * 16;
 
-    # print fh_pos($pos) ." <=> ". fh_pos($file_size), "\n";
+    # print p_pos($pos) ." <=> ". p_pos($file_size), "\n";
 
     return $pos >= $file_size;
 }
