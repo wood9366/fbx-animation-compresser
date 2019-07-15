@@ -268,9 +268,12 @@ my $file_size = -s $src;
 open my $fh, "<:raw", $src;
 
 # read fbx head
-my ($mark, $reverse0, $reverse1, $version) = read_unpack($fh, "A21 h2 h2 I", 27);
+# Bytes 0 - 20: Kaydara FBX Binary  \x00 (file-magic, with 2 spaces at the end, then a NULL terminator).
+# Bytes 21 - 22: [0x1A, 0x00] (unknown but all observed files show these bytes).
+# Bytes 23 - 26: unsigned int, the version number. 7300 for version 7.3 for example.
+my ($mark, $reverse0, $reverse1, $version) = read_unpack($fh, "Z21 h2 h2 I", 27);
 
-unless ($mark eq 'Kaydara FBX Binary') {
+unless ($mark eq 'Kaydara FBX Binary  ') {
     print "no FBX\n";
     exit 0;
 }
@@ -286,6 +289,9 @@ while (not is_end($pos, $file_size)) {
     push @nodes, read_node($fh);
     $pos = tell $fh;
 }
+
+# read tail
+read $fh, my $tail, $file_size - tell($fh);
 
 close $fh;
 
