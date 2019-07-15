@@ -183,15 +183,9 @@ sub read_prop {
 
             my $data;
 
-            if ($_ eq 'S') {
-                $data = read_unpack($fh, "a".$size, $size);
-            } elsif ($_ eq 'R') {
-                read $fh, $data, $size;
-            }
+            read $fh, $data, $size;
 
-            $data ||= "";
-
-            # print ", size: $size, data: $data\n";
+            print ", size: $size, data: $data\n";
 
             return { type => $type, size => $size, val => $data };
         }
@@ -220,7 +214,7 @@ sub read_node {
     die "read node with invalid fh" unless $fh;
 
     my ($end, $num_props, $len_props, $len_name) = read_unpack($fh, "L L L C", 13);
-    my $name = read_unpack($fh, "A".$len_name, $len_name) || "";
+    read $fh, my ($name), $len_name;
 
     my $node_name = $parent ? "$parent.$name" : $name;
 
@@ -318,7 +312,7 @@ sub write_node {
                    $node->{len_props},
                    $node->{len_name});
 
-    print $fh pack("A*", $node->{name}) if $node->{len_name} > 0;
+    print $fh $node->{name};
 
     foreach my $prop (@{$node->{props}}) {
         print $fh pack("A", $prop->{type});
@@ -349,6 +343,11 @@ sub write_node {
                                $size);
 
                 print $fh $data;
+            }
+
+            when (/S|R/) {
+                print $fh pack("L", $prop->{size});
+                print $fh $prop->{val};
             }
         }
     }
