@@ -53,43 +53,6 @@ sub read_unpack {
     return unpack $template, $buffer;
 }
 
-sub read_array_prop {
-    my $fh = shift;
-    my $type = shift;
-    my $val = 0;
-
-    die "read array prop with invalid fh" unless $fh;
-
-    given ($type) {
-        when ('f') {
-            $val += read_unpack($fh, "f", 4);
-        }
-
-        when ('d') {
-            $val += read_unpack($fh, "d", 8);
-        }
-
-        when ('l') {
-            $val += read_unpack($fh, "q", 8);
-        }
-
-        when ('i') {
-            $val += read_unpack($fh, "l", 4);
-        }
-
-        when ('b') {
-            $val += read_unpack($fh, "C", 1);
-        }
-
-        default {
-            $val = "no [$type]";
-        }
-    }
-
-    return $val;
-}
-
-
 # Y: 2 byte signed Integer
 # C: 1 bit boolean (1: true, 0: false) encoded as the LSB of a 1 Byte value.
 # I: 4 byte signed Integer
@@ -114,6 +77,51 @@ sub read_array_prop {
 #   4	Uint32	Length
 #   Length	byte/char	Data
 
+sub primary_prop_unpack_info {
+    my $type = shift || "";
+
+    given($type) {
+        when ('Y') { return ("s", 2); }
+        when ('C') { return ("C", 1); }
+        when ('I') { return ("l", 4); }
+        when ('F') { return ("f", 4); }
+        when ('D') { return ("d", 8); }
+        when ('L') { return ("q", 8); }
+        default { die "invaid primary prop type $type" }
+    }
+}
+
+sub read_primary_prop {
+    my $fh = shift;
+    my $type = shift;
+
+    die "read primary prop with invalid $fh\n" unless $fh;
+
+    return read_unpack($fh, primary_prop_unpack_info $type);
+}
+
+sub array_prop_unpack_info {
+    my $type = shift || "";
+
+    given($type) {
+        when ('f') { return ("f", 4); }
+        when ('d') { return ("d", 8); }
+        when ('l') { return ("q", 8); }
+        when ('i') { return ("l", 4); }
+        when ('b') { return ("C", 1); }
+        default { die "invaid array prop type $type" }
+    }
+}
+
+sub read_array_prop {
+    my $fh = shift;
+    my $type = shift;
+
+    die "read array prop with invalid $fh\n" unless $fh;
+
+    return read_unpack($fh, array_prop_unpack_info $type);
+}
+
 sub read_prop {
     my $fh = shift;
     my $node_name = shift;
@@ -129,57 +137,12 @@ sub read_prop {
     print "${indent}  - [$idx] type: $type";
 
     given ($type) {
-        when ('Y') {
-            my $val = read_unpack($fh, "s", 2);
-            print ", value: $val\n";
-            return { type => $type, val => $val + 0 };
-        }
+        when (/Y|C|I|F|D|L/) {
+            my $val = read_primary_prop($fh, $type) + 0;
 
-        when ('C') {
-            my $val = read_unpack($fh, "C", 1);
-            print ", value: ".($val ? "true" : "false");
-            return { type => $type, val => $val + 0 };
-        }
+            print ", val: $val\n";
 
-        when ('I') {
-            my $val = read_unpack($fh, "l", 4);
-            print ", value: $val\n";
-            return { type => $type, val => $val + 0 };
-        }
-
-        when ('F') {
-            my $val = read_unpack($fh, "f", 4);
-            print ", value: $val\n";
-            return { type => $type, val => $val + 0 };
-        }
-
-        when ('D') {
-            my $val = read_unpack($fh, "d", 8);
-            print ", value: $val\n";
-            return { type => $type, val => $val + 0 };
-        }
-
-        when ('L') {
-            my $val = read_unpack($fh, "q", 8);
-            print ", value: $val\n";
-            return { type => $type, val => $val + 0 };
-        }
-
-        when (/S|R/) {
-            my $size = read_unpack($fh, "L", 4);
-
-            my $data;
-
-            if ($_ eq 'S') {
-                $data = read_unpack($fh, "a".$size, $size);
-            } elsif ($_ eq 'R') {
-                read $fh, $data, $size;
-            }
-
-            $data ||= "";
-
-            print ", size: $size, data: $data\n";
-            return { type => $type, size => $size, val => $data };
+            return { type => $type, val => $val };
         }
 
         when (/f|d|l|i|b/) {
@@ -196,20 +159,14 @@ sub read_prop {
                 $data = uncompress $data;
 
                 open my $fdata, "<", \$data;
-
-                foreach my $idx (0 .. $len - 1) {
-                    my $prop = read_array_prop($fdata, $type);
-                    print "${indent}    - [$idx] $prop\n";
-                    push @props, $prop if $prop;
-                }
-
+                push @props, read_array_prop($fdata, $type) foreach (0 .. $len - 1);
                 close $fdata;
             } else {
-                foreach my $idx (0 .. $len - 1) {
-                    my $prop = read_array_prop($fh, $type);
-                    print "${indent}    - [$idx] $prop\n";
-                    push @props, $prop if $prop;
-                }
+                push @props, read_array_prop($fh, $type) foreach (0 .. $len - 1);
+            }
+
+            foreach (0 .. $#props) {
+                print "${indent}    - [$_] $props[$_]\n";
             }
 
             return {
@@ -219,6 +176,24 @@ sub read_prop {
                 size => $size,
                 val => \@props,
             };
+        }
+
+        when (/S|R/) {
+            my $size = read_unpack($fh, "L", 4);
+
+            my $data;
+
+            if ($_ eq 'S') {
+                $data = read_unpack($fh, "a".$size, $size);
+            } elsif ($_ eq 'R') {
+                read $fh, $data, $size;
+            }
+
+            $data ||= "";
+
+            print ", size: $size, data: $data\n";
+
+            return { type => $type, size => $size, val => $data };
         }
 
         default {
@@ -254,21 +229,13 @@ sub read_node {
 
     print "${indent}> $node_name($len_name), end: ".p_pos($end).", num props: $num_props, len props: $len_props\n";
 
-    # my $before_prop_pos = tell $fh;
-
     my @props = ();
 
     for (0 .. $num_props - 1) {
         push @props, read_prop($fh, $node_name, $_);
     }
 
-    # my $after_prop_pos = tell $fh;
-    # print p_pos($before_prop_pos)." + $len_props -> ".p_pos($after_prop_pos)."(".p_pos($end).")\n";
-    # die "read props error\n" unless $before_prop_pos + $len_props == $after_prop_pos;
-
     my $pos = tell $fh;
-
-    # print "${indent}- content end, pos: ".p_pos($pos)."\n";
 
     my @nodes = ();
 
