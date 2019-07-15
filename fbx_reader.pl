@@ -100,47 +100,54 @@ sub read_prop {
         when ('Y') {
             my $val = read_unpack("s", 2);
             print ", value: $val\n";
+            return { type => $type, val => $val + 0 };
         }
 
         when ('C') {
             my $val = read_unpack("C", 1);
             print ", value: ".($val ? "true" : "false");
+            return { type => $type, val => $val + 0 };
         }
 
         when ('I') {
             my $val = read_unpack("l", 4);
             print ", value: $val\n";
+            return { type => $type, val => $val + 0 };
         }
 
         when ('F') {
             my $val = read_unpack("f", 4);
             print ", value: $val\n";
+            return { type => $type, val => $val + 0 };
         }
 
         when ('D') {
             my $val = read_unpack("d", 8);
             print ", value: $val\n";
+            return { type => $type, val => $val + 0 };
         }
 
         when ('L') {
             my $val = read_unpack("q", 8);
             print ", value: $val\n";
+            return { type => $type, val => $val + 0 };
         }
 
         when (/S|R/) {
-            my $len = read_unpack("L", 4);
+            my $size = read_unpack("L", 4);
 
             my $data;
 
             if ($_ eq 'S') {
-                $data = read_unpack("A".$len, $len);
+                $data = read_unpack("a".$size, $size);
             } elsif ($_ eq 'R') {
-                read $fh, $data, $len;
+                read $fh, $data, $size;
             }
 
             $data ||= "";
 
-            print ", len: $len, data: $data\n";
+            print ", size: $size, data: $data\n";
+            return { type => $type, size => $size, val => $data };
         }
 
         when (/f|d|l|i|b/) {
@@ -153,39 +160,62 @@ sub read_prop {
                 read $fh, my ($data), $size;
 
                 # todo, decompress with unzip
+                return {
+                    type => $type,
+                    len => $len,
+                    enc => $enc,
+                    size => $size,
+                    val => $data,
+                };
             } else {
-                foreach (0 .. $len - 1) {
+                my @props = ();
+
+                foreach my $idx (0 .. $len - 1) {
                     given ($type) {
                         when ('f') {
                             my $val = read_unpack("f", 4);
-                            print "${indent}  - [$_] $val\n";
+                            print "${indent}    - [$idx] $val\n";
+                            push @props, $val + 0;
                         }
 
                         when ('d') {
                             my $val = read_unpack("d", 8);
-                            print "${indent}  - [$_] $val\n";
+                            print "${indent}    - [$idx] $val\n";
+                            push @props, $val + 0;
                         }
 
                         when ('l') {
                             my $val = read_unpack("q", 8);
-                            print "${indent}  - [$_] $val\n";
+                            print "${indent}    - [$idx] $val\n";
+                            push @props, $val + 0;
                         }
 
                         when ('i') {
                             my $val = read_unpack("l", 4);
-                            print "${indent}  - [$_] $val\n";
+                            print "${indent}    - [$idx] $val\n";
+                            push @props, $val + 0;
                         }
 
                         when ('b') {
                             my $val = read_unpack("C", 1);
-                            print "${indent}  - [$_] $val\n";
+                            print "${indent}    - [$idx] $val\n";
+                            push @props, $val + 0;
                         }
 
                         default {
-                            print "${indent}  - [$_] x\n";
+                            print "${indent}    - [$idx] x\n";
+                            push @props, "";
                         }
                     }
                 }
+
+                return {
+                    type => $type,
+                    len => $len,
+                    enc => $enc,
+                    size => $size,
+                    val => \@props,
+                };
             }
         }
 
@@ -193,6 +223,8 @@ sub read_prop {
             print "\n";
         }
     }
+
+    return { type => $type };
 }
 
 # 4	Uint32	EndOffset
@@ -222,8 +254,10 @@ sub read_node {
 
     # my $before_prop_pos = tell $fh;
 
+    my @props = ();
+
     for (0 .. $num_props - 1) {
-        read_prop("$node_name", $_);
+        push @props, read_prop($node_name, $_);
     }
 
     # my $after_prop_pos = tell $fh;
@@ -234,12 +268,14 @@ sub read_node {
 
     # print "${indent}- content end, pos: ".p_pos($pos)."\n";
 
+    my @nodes = ();
+
     if ($pos + 13 < $end) {
         print "${indent}- nested nodes, pos: ".p_pos($pos)."\n";
         # is end of node
         while ($pos + 13 < $end) {
             # has nested nodes
-            read_node($fh, $node_name);
+            push @nodes, read_node($fh, $node_name);
             $pos = tell $fh;
         }
 
@@ -247,13 +283,28 @@ sub read_node {
     }
 
     print "${indent}< $node_name, ".p_pos(tell $fh)."\n";
+
+    return {
+        end => $end,
+        num_props => $num_props,
+        len_props => $len_props,
+        name => $name,
+        props => \@props,
+        nodes => \@nodes,
+    };
 }
 
 my $pos = tell $fh;
 
+my @nodes = ();
+
 while (not is_end $pos) {
-    read_node $fh;
+    push @nodes, read_node($fh);
     $pos = tell $fh;
 }
 
 close $fh;
+
+use Data::Dumper;
+
+print Dumper(\@nodes);
