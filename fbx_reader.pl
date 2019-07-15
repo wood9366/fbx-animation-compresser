@@ -134,13 +134,13 @@ sub read_prop {
 
     my $type = read_unpack($fh, "A", 1);
 
-    print "${indent}  - [$idx] type: $type";
+    # print "${indent}  - [$idx] type: $type";
 
     given ($type) {
         when (/Y|C|I|F|D|L/) {
             my $val = read_primary_prop($fh, $type) + 0;
 
-            print ", val: $val\n";
+            # print ", val: $val\n";
 
             return { type => $type, val => $val };
         }
@@ -149,7 +149,7 @@ sub read_prop {
             my $type = $_;
             my ($len, $enc, $size) = read_unpack($fh, "LLL", 12);
 
-            print ", len: $len, end: $enc, size: $size\n";
+            # print ", len: $len, end: $enc, size: $size\n";
 
             my @props = ();
 
@@ -165,9 +165,9 @@ sub read_prop {
                 push @props, read_array_prop($fh, $type) foreach (0 .. $len - 1);
             }
 
-            foreach (0 .. $#props) {
-                print "${indent}    - [$_] $props[$_]\n";
-            }
+            # foreach (0 .. $#props) {
+            #     print "${indent}    - [$_] $props[$_]\n";
+            # }
 
             return {
                 type => $type,
@@ -191,13 +191,13 @@ sub read_prop {
 
             $data ||= "";
 
-            print ", size: $size, data: $data\n";
+            # print ", size: $size, data: $data\n";
 
             return { type => $type, size => $size, val => $data };
         }
 
         default {
-            print "\n";
+            # print "\n";
         }
     }
 
@@ -227,7 +227,7 @@ sub read_node {
     my $lv = () = $node_name =~ /\./g;
     my $indent = "  " x $lv;
 
-    print "${indent}> $node_name($len_name), end: ".p_pos($end).", num props: $num_props, len props: $len_props\n";
+    # print "${indent}> $node_name($len_name), end: ".p_pos($end).", num props: $num_props, len props: $len_props\n";
 
     my @props = ();
 
@@ -240,7 +240,7 @@ sub read_node {
     my @nodes = ();
 
     if ($pos + 13 < $end) {
-        print "${indent}- nested nodes, pos: ".p_pos($pos)."\n";
+        # print "${indent}- nested nodes, pos: ".p_pos($pos)."\n";
         # is end of node
         while ($pos + 13 < $end) {
             # has nested nodes
@@ -251,7 +251,7 @@ sub read_node {
         seek $fh, 13, 1;
     }
 
-    print "${indent}< $node_name, ".p_pos(tell $fh)."\n";
+    # print "${indent}< $node_name, ".p_pos(tell $fh)."\n";
 
     return {
         end => $end,
@@ -289,4 +289,4 @@ while (not is_end($pos, $file_size)) {
 
 close $fh;
 
-print Dumper(\@nodes);
+# print Dumper(\@nodes);
