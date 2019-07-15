@@ -94,7 +94,7 @@ sub read_node {
         # is end of node
         while ($pos + 13 < $end) {
             # has nested nodes
-            read_node($fh, $parent ? "$parent.$name" : $name);
+            read_node($fh, $node_name);
             $pos = tell $fh;
         }
 
