@@ -3,26 +3,14 @@
 use warnings;
 use strict;
 
+use Data::Dumper;
+use Compress::Zlib;
+
 use feature qw / switch /;
 
 my $src = shift @ARGV;
 
 die "invalid src" unless $src and -e $src;
-
-my $file_size = -s $src;
-
-open my $fh, "<:raw", $src;
-
-read $fh, my $head, 27;
-
-my ($mark, $reverse0, $reverse1, $version) = unpack("A21 h2 h2 I", $head);
-
-unless ($mark eq 'Kaydara FBX Binary') {
-    print "no FBX\n";
-    exit 0;
-}
-
-print "FBX version: $version, size: $file_size\n";
 
 sub p_pos {
     my $pos = shift || 0;
@@ -31,6 +19,7 @@ sub p_pos {
 
 sub is_end {
     my $pos = shift || 0;
+    my $file_size = shift || 0;
 
     # 固定长度偏移
     $pos += 24;
@@ -50,11 +39,14 @@ sub is_end {
 }
 
 sub read_unpack {
+    my $fh = shift;
     my $template = shift || "";
     my $size = shift || 0;
 
+    die "read unpack invalid fh" unless $fh;
+
     return () unless $template ne "" and $size > 0;
-    return () unless tell($fh) + $size <= $file_size;
+    # return () unless tell($fh) + $size <= $file_size;
 
     read $fh, my ($buffer), $size;
 
@@ -86,60 +78,63 @@ sub read_unpack {
 #   Length	byte/char	Data
 
 sub read_prop {
+    my $fh = shift;
     my $node_name = shift;
     my $idx = shift || 0;
+
+    die "read prop with invalid fh" unless $fh;
 
     my $lv = () = $node_name =~ /\./g;
     my $indent = "  " x $lv;
 
-    my $type = read_unpack("A", 1);
+    my $type = read_unpack($fh, "A", 1);
 
     print "${indent}  - [$idx] type: $type";
 
     given ($type) {
         when ('Y') {
-            my $val = read_unpack("s", 2);
+            my $val = read_unpack($fh, "s", 2);
             print ", value: $val\n";
             return { type => $type, val => $val + 0 };
         }
 
         when ('C') {
-            my $val = read_unpack("C", 1);
+            my $val = read_unpack($fh, "C", 1);
             print ", value: ".($val ? "true" : "false");
             return { type => $type, val => $val + 0 };
         }
 
         when ('I') {
-            my $val = read_unpack("l", 4);
+            my $val = read_unpack($fh, "l", 4);
             print ", value: $val\n";
             return { type => $type, val => $val + 0 };
         }
 
         when ('F') {
-            my $val = read_unpack("f", 4);
+            my $val = read_unpack($fh, "f", 4);
             print ", value: $val\n";
             return { type => $type, val => $val + 0 };
         }
 
         when ('D') {
-            my $val = read_unpack("d", 8);
+            my $val = read_unpack($fh, "d", 8);
             print ", value: $val\n";
             return { type => $type, val => $val + 0 };
         }
 
         when ('L') {
-            my $val = read_unpack("q", 8);
+            my $val = read_unpack($fh, "q", 8);
             print ", value: $val\n";
             return { type => $type, val => $val + 0 };
         }
 
         when (/S|R/) {
-            my $size = read_unpack("L", 4);
+            my $size = read_unpack($fh, "L", 4);
 
             my $data;
 
             if ($_ eq 'S') {
-                $data = read_unpack("a".$size, $size);
+                $data = read_unpack($fh, "a".$size, $size);
             } elsif ($_ eq 'R') {
                 read $fh, $data, $size;
             }
@@ -152,7 +147,7 @@ sub read_prop {
 
         when (/f|d|l|i|b/) {
             my $type = $_;
-            my ($len, $enc, $size) = read_unpack("LLL", 12);
+            my ($len, $enc, $size) = read_unpack($fh, "LLL", 12);
 
             print ", len: $len, end: $enc, size: $size\n";
 
@@ -173,31 +168,31 @@ sub read_prop {
                 foreach my $idx (0 .. $len - 1) {
                     given ($type) {
                         when ('f') {
-                            my $val = read_unpack("f", 4);
+                            my $val = read_unpack($fh, "f", 4);
                             print "${indent}    - [$idx] $val\n";
                             push @props, $val + 0;
                         }
 
                         when ('d') {
-                            my $val = read_unpack("d", 8);
+                            my $val = read_unpack($fh, "d", 8);
                             print "${indent}    - [$idx] $val\n";
                             push @props, $val + 0;
                         }
 
                         when ('l') {
-                            my $val = read_unpack("q", 8);
+                            my $val = read_unpack($fh, "q", 8);
                             print "${indent}    - [$idx] $val\n";
                             push @props, $val + 0;
                         }
 
                         when ('i') {
-                            my $val = read_unpack("l", 4);
+                            my $val = read_unpack($fh, "l", 4);
                             print "${indent}    - [$idx] $val\n";
                             push @props, $val + 0;
                         }
 
                         when ('b') {
-                            my $val = read_unpack("C", 1);
+                            my $val = read_unpack($fh, "C", 1);
                             print "${indent}    - [$idx] $val\n";
                             push @props, $val + 0;
                         }
@@ -240,10 +235,10 @@ sub read_node {
     my $fh = shift;
     my $parent = shift || "";
 
-    return unless $fh;
+    die "read node with invalid fh" unless $fh;
 
-    my ($end, $num_props, $len_props, $len_name) = read_unpack("L L L C", 13);
-    my $name = read_unpack("A".$len_name, $len_name) || "";
+    my ($end, $num_props, $len_props, $len_name) = read_unpack($fh, "L L L C", 13);
+    my $name = read_unpack($fh, "A".$len_name, $len_name) || "";
 
     my $node_name = $parent ? "$parent.$name" : $name;
 
@@ -257,7 +252,7 @@ sub read_node {
     my @props = ();
 
     for (0 .. $num_props - 1) {
-        push @props, read_prop($node_name, $_);
+        push @props, read_prop($fh, $node_name, $_);
     }
 
     # my $after_prop_pos = tell $fh;
@@ -294,17 +289,30 @@ sub read_node {
     };
 }
 
+my $file_size = -s $src;
+
+open my $fh, "<:raw", $src;
+
+# read fbx head
+my ($mark, $reverse0, $reverse1, $version) = read_unpack($fh, "A21 h2 h2 I", 27);
+
+unless ($mark eq 'Kaydara FBX Binary') {
+    print "no FBX\n";
+    exit 0;
+}
+
+print "FBX version: $version, size: $file_size\n";
+
+# read fbx nodes
 my $pos = tell $fh;
 
 my @nodes = ();
 
-while (not is_end $pos) {
+while (not is_end($pos, $file_size)) {
     push @nodes, read_node($fh);
     $pos = tell $fh;
 }
 
 close $fh;
-
-use Data::Dumper;
 
 print Dumper(\@nodes);
