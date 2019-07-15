@@ -79,18 +79,20 @@ sub read_node {
 
     my $node_name = $parent ? "$parent.$name" : $name;
 
+    my $lv = () = $node_name =~ /\./g;
+    my $indent = "  " x $lv;
+
+    print "${indent}> $node_name($len_name), end: $end, num props: $num_props, len props: $len_props\n";
+
     # skip props
     seek $fh, $len_props, 1;
 
     my $pos = tell $fh;
 
-    my $lv = () = $node_name =~ /\./g;
-    my $indent = "  " x $lv;
-
-    print "${indent}> $node_name($len_name)\n";
-    print "${indent}  end: $end, num props: $num_props, len props: $len_props, pos: ".p_pos($pos)."\n";
+    print "${indent}- content end, pos: ".p_pos($pos)."\n";
 
     if ($pos + 13 < $end) {
+        print "${indent}- nested nodes\n";
         # is end of node
         while ($pos + 13 < $end) {
             # has nested nodes
