@@ -257,6 +257,7 @@ sub read_node {
         end => $end,
         num_props => $num_props,
         len_props => $len_props,
+        len_name => $len_name,
         name => $name,
         props => \@props,
         nodes => \@nodes,
@@ -271,7 +272,7 @@ open my $fh, "<:raw", $src;
 # Bytes 0 - 20: Kaydara FBX Binary  \x00 (file-magic, with 2 spaces at the end, then a NULL terminator).
 # Bytes 21 - 22: [0x1A, 0x00] (unknown but all observed files show these bytes).
 # Bytes 23 - 26: unsigned int, the version number. 7300 for version 7.3 for example.
-my ($mark, $reverse0, $reverse1, $version) = read_unpack($fh, "Z21 h2 h2 I", 27);
+my ($mark, $reverse0, $reverse1, $version) = read_unpack($fh, "Z* h2 h2 I", 27);
 
 unless ($mark eq 'Kaydara FBX Binary  ') {
     print "no FBX\n";
@@ -291,8 +292,84 @@ while (not is_end($pos, $file_size)) {
 }
 
 # read tail
-read $fh, my $tail, $file_size - tell($fh);
+read $fh, my $tail_1, 24;
+
+# skip align
+my $align = tell($fh) % 16;
+seek $fh, 16 - $align, 1 if $align;
+
+read $fh, my $tail_2, 9 * 16;
 
 close $fh;
+
+open my $fh_out, ">", "out.fbx";
+
+# write head
+print $fh_out pack("Z* h2 h2 I", $mark, $reverse0, $reverse1, $version);
+
+# write content
+sub write_node {
+    my $fh = shift;
+    my $node = shift;
+
+    print $fh pack("L L L C",
+                   $node->{end},
+                   $node->{num_props},
+                   $node->{len_props},
+                   $node->{len_name});
+
+    print $fh pack("A*", $node->{name}) if $node->{len_name} > 0;
+
+    foreach my $prop (@{$node->{props}}) {
+        print $fh pack("A", $prop->{type});
+
+        given ($prop->{type}) {
+            when (/Y|C|I|F|D|L/) {
+                print $fh pack((primary_prop_unpack_info($prop->{type}))[0],
+                               $prop->{val});
+            }
+
+            when (/f|d|l|i|b/) {
+                my $data = pack((array_prop_unpack_info($prop->{type}))[0] x $prop->{len},
+                                @{$prop->{val}});
+
+                my $size = $prop->{size};
+
+                if ($prop->{enc} == 1) {
+                    $data = compress($data);
+                    $size = length($data);
+
+                    print "compressed data size change $prop->{size} => $size\n"
+                        unless $prop->{size} == $size;
+                }
+
+                print $fh pack("LLL",
+                               $prop->{len},
+                               $prop->{enc},
+                               $size);
+
+                print $fh $data;
+            }
+        }
+    }
+
+    if (@{$node->{nodes}}) {
+        write_node($fh, $_) foreach @{$node->{nodes}};
+        print $fh ("\x00"x13);
+    }
+}
+
+write_node $fh_out, $_ foreach @nodes;
+
+# write tail
+print $fh_out $tail_1;
+
+# 16 align
+$align = tell($fh_out) % 16;
+print $fh_out ("\x00"x(16 - $align));
+
+print $fh_out $tail_2;
+
+close $fh_out;
 
 # print Dumper(\@nodes);
