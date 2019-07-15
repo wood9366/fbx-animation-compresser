@@ -53,6 +53,43 @@ sub read_unpack {
     return unpack $template, $buffer;
 }
 
+sub read_array_prop {
+    my $fh = shift;
+    my $type = shift;
+    my $val = 0;
+
+    die "read array prop with invalid fh" unless $fh;
+
+    given ($type) {
+        when ('f') {
+            $val += read_unpack($fh, "f", 4);
+        }
+
+        when ('d') {
+            $val += read_unpack($fh, "d", 8);
+        }
+
+        when ('l') {
+            $val += read_unpack($fh, "q", 8);
+        }
+
+        when ('i') {
+            $val += read_unpack($fh, "l", 4);
+        }
+
+        when ('b') {
+            $val += read_unpack($fh, "C", 1);
+        }
+
+        default {
+            $val = "no [$type]";
+        }
+    }
+
+    return $val;
+}
+
+
 # Y: 2 byte signed Integer
 # C: 1 bit boolean (1: true, 0: false) encoded as the LSB of a 1 Byte value.
 # I: 4 byte signed Integer
@@ -151,67 +188,37 @@ sub read_prop {
 
             print ", len: $len, end: $enc, size: $size\n";
 
+            my @props = ();
+
             if ($enc == 1) {
                 read $fh, my ($data), $size;
 
-                # todo, decompress with unzip
-                return {
-                    type => $type,
-                    len => $len,
-                    enc => $enc,
-                    size => $size,
-                    val => $data,
-                };
-            } else {
-                my @props = ();
+                $data = uncompress $data;
+
+                open my $fdata, "<", \$data;
 
                 foreach my $idx (0 .. $len - 1) {
-                    given ($type) {
-                        when ('f') {
-                            my $val = read_unpack($fh, "f", 4);
-                            print "${indent}    - [$idx] $val\n";
-                            push @props, $val + 0;
-                        }
-
-                        when ('d') {
-                            my $val = read_unpack($fh, "d", 8);
-                            print "${indent}    - [$idx] $val\n";
-                            push @props, $val + 0;
-                        }
-
-                        when ('l') {
-                            my $val = read_unpack($fh, "q", 8);
-                            print "${indent}    - [$idx] $val\n";
-                            push @props, $val + 0;
-                        }
-
-                        when ('i') {
-                            my $val = read_unpack($fh, "l", 4);
-                            print "${indent}    - [$idx] $val\n";
-                            push @props, $val + 0;
-                        }
-
-                        when ('b') {
-                            my $val = read_unpack($fh, "C", 1);
-                            print "${indent}    - [$idx] $val\n";
-                            push @props, $val + 0;
-                        }
-
-                        default {
-                            print "${indent}    - [$idx] x\n";
-                            push @props, "";
-                        }
-                    }
+                    my $prop = read_array_prop($fdata, $type);
+                    print "${indent}    - [$idx] $prop\n";
+                    push @props, $prop if $prop;
                 }
 
-                return {
-                    type => $type,
-                    len => $len,
-                    enc => $enc,
-                    size => $size,
-                    val => \@props,
-                };
+                close $fdata;
+            } else {
+                foreach my $idx (0 .. $len - 1) {
+                    my $prop = read_array_prop($fh, $type);
+                    print "${indent}    - [$idx] $prop\n";
+                    push @props, $prop if $prop;
+                }
             }
+
+            return {
+                type => $type,
+                len => $len,
+                enc => $enc,
+                size => $size,
+                val => \@props,
+            };
         }
 
         default {
