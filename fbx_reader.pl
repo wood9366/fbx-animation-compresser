@@ -306,6 +306,9 @@ sub write_node {
     my $fh = shift;
     my $node = shift;
 
+    my $end_pos = tell $fh;
+    my $len_props_pos = $end_pos + 8;
+
     print $fh pack("L L L C",
                    $node->{end},
                    $node->{num_props},
@@ -313,6 +316,8 @@ sub write_node {
                    $node->{len_name});
 
     print $fh $node->{name};
+
+    my $prop_start_pos = tell $fh;
 
     foreach my $prop (@{$node->{props}}) {
         print $fh pack("A", $prop->{type});
@@ -352,10 +357,20 @@ sub write_node {
         }
     }
 
+    my $pos = tell $fh;
+    seek $fh, $len_props_pos, 0;
+    print $fh pack("L", $pos - $prop_start_pos);
+    seek $fh, $pos, 0;
+
     if (@{$node->{nodes}}) {
         write_node($fh, $_) foreach @{$node->{nodes}};
         print $fh ("\x00"x13);
     }
+
+    $pos = tell $fh;
+    seek $fh, $end_pos, 0;
+    print $fh pack("L", $pos - 1);
+    seek $fh, $pos, 0;
 }
 
 write_node $fh_out, $_ foreach @nodes;
