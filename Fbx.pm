@@ -8,6 +8,66 @@ use experimental qw / switch /;
 use Compress::Zlib;
 use Data::Dumper;
 
+# Binary FBX File Structure
+
+# HEAD, 27 bytes
+# Bytes 0 - 20: Kaydara FBX Binary  \x00 (file-magic, with 2 spaces at the end, then a NULL terminator).
+# Bytes 21 - 22: [0x1A, 0x00] (unknown but all observed files show these bytes).
+# Bytes 23 - 26: unsigned int, the version number. 7300 for version 7.3 for example.
+
+# NODE, ?
+# Size (Bytes)	Data Type	Name
+# 4	Uint32	EndOffset
+# 4	Uint32	NumProperties
+# 4	Uint32	PropertyListLen
+# 1	Uint8t	NameLen
+# NameLen	char	Name
+# ?	?	Property[n], for n in 0:PropertyListLen
+# Optional		
+# ?	?	Nested Nodes
+# 13	uint8[]	NULL-record
+
+# PROP
+# Size (Bytes)	Data Type	Name
+# 1	char	TypeCode
+# ?	?	Data
+
+# Primitive Types
+# Y: 2 byte signed Integer
+# C: 1 bit boolean (1: true, 0: false) encoded as the LSB of a 1 Byte value.
+# I: 4 byte signed Integer
+# F: 4 byte single-precision IEEE 754 number
+# D: 8 byte double-precision IEEE 754 number
+# L: 8 byte signed Integer
+
+# Array types
+# f: Array of 4 byte single-precision IEEE 754 number
+# d: Array of 8 byte double-precision IEEE 754 number
+# l: Array of 8 byte signed Integer
+# i: Array of 4 byte signed Integer
+# b: Array of 1 byte Booleans (always 0 or 1)
+
+# Encoding 1, compressed(deflate/zip-compressed(zlib)), use CompressedLength
+# Encoding 0, no compressed, size = ArrayLength * Item Type
+# Size (Bytes)	Data Type	Name
+# 4	Uint32	ArrayLength
+# 4	Uint32	Encoding
+# 4	Uint32	CompressedLength
+# ?	?	Contents
+
+# Special types
+# S: String
+# R: raw binary data
+
+# Size (Bytes)	Data Type	Name
+# 4	Uint32	Length
+# Length	byte/char	Data
+
+# TAIL
+# Bytes 16: Content depends on file, no rule?
+# 16 Bytes Alignment
+# Bytes 16 * 9: Fixed Tail Content
+
 sub p_pos {
     my $pos = shift || 0;
     sprintf("%d(0x%X)", $pos, $pos);
@@ -81,6 +141,7 @@ sub _read_head {
 
     my $head;
 
+    # fixed 27 bytes head, const
     @$head{'mark', 'reverse0', 'reverse1', 'version'} =
         read_unpack($fh, "Z* h2 h2 I", 27);
 
@@ -97,7 +158,7 @@ sub _read_tail {
     read $fh, $tail->{1}, 16;
     print "\ntail_1:\n", p_mem($tail->{1}), "\n" if $self->{debug};
 
-    # skip align bytes
+    # 16 bytes alignment
     my $align = tell($fh) % 16;
     seek $fh, 16 - $align, 1 if $align;
 
