@@ -115,6 +115,11 @@ sub load {
     close $fh;
 }
 
+sub data {
+    my $self = shift;
+    return $self->{data};
+}
+
 sub _is_fbx {
     my $self = shift;
 
@@ -359,6 +364,7 @@ sub _read_node {
         len_props => $len_props,
         len_name => $len_name,
         name => $name,
+        node_name => $node_name,
         props => \@props,
         nodes => \@nodes,
     };
