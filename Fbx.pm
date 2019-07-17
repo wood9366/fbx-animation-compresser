@@ -3,10 +3,10 @@ package Fbx;
 use strict;
 use warnings;
 
+use experimental qw / switch /;
+
 use Compress::Zlib;
 use Data::Dumper;
-
-use feature qw / switch /;
 
 sub p_pos {
     my $pos = shift || 0;
