@@ -41,13 +41,13 @@ sub load {
 
     open my $fh, "<:raw", $path;
 
-    $self->{data}{head} = $self->read_head($fh);
+    $self->{data}{head} = $self->_read_head($fh);
 
-    if ($self->is_fbx()) {
+    if ($self->_is_fbx()) {
         print "FBX version: $self->{data}{head}{version}, size: $self->{size}\n" if $self->{debug};
 
-        $self->{data}{node} = $self->read_node($fh);
-        $self->{data}{tail} = $self->read_tail($fh);
+        $self->{data}{node} = $self->_read_node($fh);
+        $self->{data}{tail} = $self->_read_tail($fh);
     } else {
         $self->{data} = {};
     }
@@ -55,7 +55,7 @@ sub load {
     close $fh;
 }
 
-sub is_fbx {
+sub _is_fbx {
     my $self = shift;
 
     return $self->{data}{head}{mark} eq 'Kaydara FBX Binary  ';
@@ -75,7 +75,7 @@ sub read_unpack {
     return unpack $template, $buffer;
 }
 
-sub read_head {
+sub _read_head {
     my $self = shift;
     my $fh = shift;
 
@@ -87,7 +87,7 @@ sub read_head {
     return $head;
 }
 
-sub read_tail {
+sub _read_tail {
     my $self = shift;
     my $fh = shift;
 
@@ -153,7 +153,7 @@ sub read_array_prop {
     return read_unpack($fh, array_prop_unpack_info $type);
 }
 
-sub read_prop {
+sub _read_prop {
     my $self = shift;
     my $fh = shift;
     my $node_name = shift;
@@ -232,7 +232,7 @@ sub read_prop {
     return { type => $type };
 }
 
-sub read_node {
+sub _read_node {
     my $self = shift;
     my $fh = shift;
     my $parent = shift;
@@ -268,7 +268,7 @@ sub read_node {
     print "${indent}> $node_name($len_name), start: ".p_pos($start_pos).", end: ".p_pos($end).", num props: $num_props, len props: $len_props\n" if $self->{debug};
 
     for (0 .. $num_props - 1) {
-        push @props, $self->read_prop($fh, $node_name, $_);
+        push @props, $self->_read_prop($fh, $node_name, $_);
     }
 
     my @nodes = ();
@@ -277,7 +277,7 @@ sub read_node {
     my $has_magic_tail = 0;
 
     while (tell($fh) < $node_end_pos) {
-        my $node = $self->read_node($fh, $node_name, $lv + 1);
+        my $node = $self->_read_node($fh, $node_name, $lv + 1);
 
         if ($node) {
             push @nodes, $node;
