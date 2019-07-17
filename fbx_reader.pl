@@ -12,30 +12,19 @@ my $src = shift @ARGV;
 
 die "invalid src" unless $src and -e $src;
 
+my $file_size = -s $src;
+
 sub p_pos {
     my $pos = shift || 0;
     sprintf("%d(0x%X)", $pos, $pos);
 }
 
-sub is_end {
-    my $pos = shift || 0;
-    my $file_size = shift || 0;
+sub p_mem {
+    my $data = shift || "";
 
-    # 固定长度偏移
-    $pos += 24;
-
-    # 16字节对齐
-    my $align = $pos % 16;
-    if ($align) {
-        $pos += 16 - $align;
-    }
-
-    # 固定长度偏移
-    $pos += 9 * 16;
-
-    # print p_pos($pos) ." <=> ". p_pos($file_size), "\n";
-
-    return $pos >= $file_size;
+    my $i;
+    join "", map { ++$i % 16 ? "$_ " : "$_\n" }
+        unpack("H2" x length($data), $data);
 }
 
 sub read_unpack {
@@ -134,13 +123,13 @@ sub read_prop {
 
     my $type = read_unpack($fh, "A", 1);
 
-    # print "${indent}  - [$idx] type: $type";
+    print "${indent}  - [$idx] type: $type";
 
     given ($type) {
         when (/Y|C|I|F|D|L/) {
             my $val = read_primary_prop($fh, $type) + 0;
 
-            # print ", val: $val\n";
+            print ", val: $val\n";
 
             return { type => $type, val => $val };
         }
@@ -149,7 +138,7 @@ sub read_prop {
             my $type = $_;
             my ($len, $enc, $size) = read_unpack($fh, "LLL", 12);
 
-            # print ", len: $len, end: $enc, size: $size\n";
+            print ", len: $len, end: $enc, size: $size\n";
 
             my @props = ();
 
@@ -165,9 +154,9 @@ sub read_prop {
                 push @props, read_array_prop($fh, $type) foreach (0 .. $len - 1);
             }
 
-            # foreach (0 .. $#props) {
-            #     print "${indent}    - [$_] $props[$_]\n";
-            # }
+            foreach (0 .. $#props) {
+                print "${indent}    - [$_] $props[$_]\n";
+            }
 
             return {
                 type => $type,
@@ -191,7 +180,7 @@ sub read_prop {
         }
 
         default {
-            # print "\n";
+            print "\n";
         }
     }
 
@@ -209,46 +198,65 @@ sub read_prop {
 # 13	uint8[]	NULL-record
 sub read_node {
     my $fh = shift;
-    my $parent = shift || "";
+    my $parent = shift;
+    my $lv = shift || 0;
 
     die "read node with invalid fh" unless $fh;
 
-    my ($end, $num_props, $len_props, $len_name) = read_unpack($fh, "L L L C", 13);
-    read $fh, my ($name), $len_name;
+    my $end;
+    my $num_props = 0;
+    my $len_props = 0;
+    my $len_name = 0;
+    my $name = "";
+    my @props = ();
 
-    my $node_name = $parent ? "$parent.$name" : $name;
-
-    my $lv = () = $node_name =~ /\./g;
+    my $node_name = "";
     my $indent = "  " x $lv;
 
-    # print "${indent}> $node_name($len_name), end: ".p_pos($end).", num props: $num_props, len props: $len_props\n";
+    my $start_pos = tell $fh;
 
-    my @props = ();
+    if ($parent) {
+        ($end, $num_props, $len_props, $len_name) = read_unpack($fh, "L L L C", 13);
+
+        # node 13 0x00 terminal
+        return undef unless $end > 0;
+
+        read $fh, ($name), $len_name;
+
+        $node_name = $parent ? "$parent.$name" : $name;
+    } else {
+        $node_name = "ROOT";
+    }
+
+    print "${indent}> $node_name($len_name), start: ".p_pos($start_pos).", end: ".p_pos($end).", num props: $num_props, len props: $len_props\n";
 
     for (0 .. $num_props - 1) {
         push @props, read_prop($fh, $node_name, $_);
     }
 
-    my $pos = tell $fh;
-
     my @nodes = ();
 
-    if ($pos + 13 < $end) {
-        # print "${indent}- nested nodes, pos: ".p_pos($pos)."\n";
-        # is end of node
-        while ($pos + 13 < $end) {
-            # has nested nodes
-            push @nodes, read_node($fh, $node_name);
-            $pos = tell $fh;
-        }
+    my $node_end_pos = $parent ? $end : $file_size;
+    my $has_magic_tail = 0;
 
-        seek $fh, 13, 1;
+    while (tell($fh) < $node_end_pos) {
+        my $node = read_node($fh, $node_name, $lv + 1);
+
+        if ($node) {
+            push @nodes, $node;
+        } else {
+            $has_magic_tail = 1;
+            last;
+        }
     }
 
-    # print "${indent}< $node_name, ".p_pos(tell $fh)."\n";
+    my $pos = tell $fh;
+    print "${indent}< $node_name, ".($has_magic_tail ? "o" : "x").", ".p_pos($pos)."\n";
+    die "$node_name end pos not match\n" unless not $parent or $pos == $end;
 
     return {
         end => $end,
+        has_magic_tail => $has_magic_tail,
         num_props => $num_props,
         len_props => $len_props,
         len_name => $len_name,
@@ -257,8 +265,6 @@ sub read_node {
         nodes => \@nodes,
     };
 }
-
-my $file_size = -s $src;
 
 open my $fh, "<:raw", $src;
 
@@ -276,25 +282,24 @@ unless ($mark eq 'Kaydara FBX Binary  ') {
 print "FBX version: $version, size: $file_size\n";
 
 # read fbx nodes
-my $pos = tell $fh;
-
-my @nodes = ();
-
-while (not is_end($pos, $file_size)) {
-    push @nodes, read_node($fh);
-    $pos = tell $fh;
-}
+my $node = read_node $fh;
 
 # read tail
-read $fh, my $tail_1, 24;
+# tail 1, fixed 16 bytes length, changed depends on file, no rules?
+read $fh, my $tail_1, 16;
+print "\ntail_1:\n", p_mem($tail_1), "\n";
 
-# skip align
+# skip align bytes
 my $align = tell($fh) % 16;
 seek $fh, 16 - $align, 1 if $align;
 
+# tail 2, fixed 9 * 16 bytes length, const
 read $fh, my $tail_2, 9 * 16;
+print "\ntail_2:\n", p_mem($tail_2), "\n";
 
 close $fh;
+
+exit 0;
 
 open my $fh_out, ">", "out.fbx";
 
@@ -306,16 +311,21 @@ sub write_node {
     my $fh = shift;
     my $node = shift;
 
+    my $is_root = $node->{len_name} == 0;
+
     my $end_pos = tell $fh;
     my $len_props_pos = $end_pos + 8;
 
-    print $fh pack("L L L C",
-                   $node->{end},
-                   $node->{num_props},
-                   $node->{len_props},
-                   $node->{len_name});
+    unless ($is_root) {
+        print $fh pack("L L L C",
+                    $node->{end},
+                    $node->{num_props},
+                    $node->{len_props},
+                    $node->{len_name});
 
-    print $fh $node->{name};
+        print $fh $node->{name};
+
+    }
 
     my $prop_start_pos = tell $fh;
 
@@ -325,7 +335,7 @@ sub write_node {
         given ($prop->{type}) {
             when (/Y|C|I|F|D|L/) {
                 print $fh pack((primary_prop_unpack_info($prop->{type}))[0],
-                               $prop->{val});
+                            $prop->{val});
             }
 
             when (/f|d|l|i|b/) {
@@ -338,14 +348,14 @@ sub write_node {
                     $data = compress($data);
                     $size = length($data);
 
-                    print "compressed data size change $prop->{size} => $size\n"
-                        unless $prop->{size} == $size;
+                    # print "compressed data size change $prop->{size} => $size\n"
+                    #     unless $prop->{size} == $size;
                 }
 
                 print $fh pack("LLL",
-                               $prop->{len},
-                               $prop->{enc},
-                               $size);
+                            $prop->{len},
+                            $prop->{enc},
+                            $size);
 
                 print $fh $data;
             }
@@ -357,23 +367,28 @@ sub write_node {
         }
     }
 
-    my $pos = tell $fh;
-    seek $fh, $len_props_pos, 0;
-    print $fh pack("L", $pos - $prop_start_pos);
-    seek $fh, $pos, 0;
+    unless ($is_root) {
+        my $pos = tell $fh;
+        seek $fh, $len_props_pos, 0;
+        print $fh pack("L", $pos - $prop_start_pos);
+        seek $fh, $pos, 0;
+    }
 
     if (@{$node->{nodes}}) {
         write_node($fh, $_) foreach @{$node->{nodes}};
-        print $fh ("\x00"x13);
     }
 
-    $pos = tell $fh;
-    seek $fh, $end_pos, 0;
-    print $fh pack("L", $pos - 1);
-    seek $fh, $pos, 0;
+    print $fh ("\x00"x13) if $node->{has_magic_tail};
+
+    unless ($is_root) {
+        my $pos = tell $fh;
+        seek $fh, $end_pos, 0;
+        print $fh pack("L", $pos);
+        seek $fh, $pos, 0;
+    }
 }
 
-write_node $fh_out, $_ foreach @nodes;
+write_node $fh_out, $node;
 
 # write tail
 print $fh_out $tail_1;
