@@ -30,12 +30,15 @@ $fbx->load($fbx_path);
 
 my $data = $fbx->data();
 
+my $num_compressed_value = 0;
+
 sub get_node {
     my $node = shift;
 
     if ($node->{node_name} eq 'ROOT.Objects.AnimationCurve.KeyValueFloat') {
         foreach my $prop (@{$node->{props}}) {
             $prop->{val} = [ map { sprintf("%.${precision}f", $_) + 0 } @{$prop->{val}} ];
+            $num_compressed_value += @{$prop->{val}};
         }
     }
 
@@ -44,4 +47,9 @@ sub get_node {
 
 get_node($data->{node});
 
-$fbx->save($fbx_path);
+if ($num_compressed_value > 0) {
+    print "compress [$num_compressed_value] values\n";
+    $fbx->save($fbx_path);
+} else {
+    print "no animation data found\n";
+}
